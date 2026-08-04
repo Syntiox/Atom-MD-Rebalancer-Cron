@@ -1,4 +1,4 @@
-﻿name: Atom-MD Rebalancer Cron
+name: Atom-MD Rebalancer Cron
 
 on:
   schedule:
@@ -10,20 +10,39 @@ jobs:
   ping-rebalancer:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Logs Folder and Timestamp
+        run: |
+          mkdir -p logs
+          TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+
+          echo "LOG_FILE=logs/log_${TIMESTAMP}.json" >> $GITHUB_ENV
+
       - name: Ping Rebalancer API
         run: |
-          # Fetch API and save response to a file
+
           curl -s -X GET "https://atom.syntiox.top/api/rebalancer" \
           -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
-          -o rebalancer-log.json \
+          -o ${{ env.LOG_FILE }} \
           --fail
           
           echo "--- API Response ---"
-          cat rebalancer-log.json
+          cat ${{ env.LOG_FILE }}
 
       - name: Upload Logs as Artifact
-        if: always() # This ensures logs are uploaded even if the curl command fails
+        if: always() 
         uses: actions/upload-artifact@v4
         with:
           name: rebalancer-cron-logs
-          path: rebalancer-log.json
+          path: ${{ env.LOG_FILE }}
+
+      - name: Commit and Push logs to Repository
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add logs/
+          
+          git diff-index --quiet HEAD || git commit -m "📝 Add log for $(date +"%Y-%m-%d %H:%M:%S")"
+          git push
