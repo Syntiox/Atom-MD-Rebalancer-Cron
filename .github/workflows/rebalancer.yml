@@ -1,0 +1,29 @@
+﻿name: Atom-MD Rebalancer Cron
+
+on:
+  schedule:
+    # Runs every 5 minutes
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Allows manual triggering from GitHub Actions tab
+
+jobs:
+  ping-rebalancer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Rebalancer API
+        run: |
+          # Fetch API and save response to a file
+          curl -s -X GET "https://atom.syntiox.top/api/rebalancer" \
+          -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+          -o rebalancer-log.json \
+          --fail
+          
+          echo "--- API Response ---"
+          cat rebalancer-log.json
+
+      - name: Upload Logs as Artifact
+        if: always() # This ensures logs are uploaded even if the curl command fails
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebalancer-cron-logs
+          path: rebalancer-log.json
