@@ -1,13 +1,18 @@
+
 name: Atom-MD Rebalancer Cron
 
 on:
   schedule:
     - cron: '*/5 * * * *'
-  workflow_dispatch: 
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   ping-rebalancer:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -15,36 +20,67 @@ jobs:
       - name: Setup Logs Folder and Timestamp
         run: |
           mkdir -p logs
-          TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-          echo "LOG_FILE=logs/log_${TIMESTAMP}.json" >> $GITHUB_ENV
+
+          TIMESTAMP=$(date -u +"%Y-%m-%d_%H-%M-%S")
+          echo "LOG_FILE=logs/log_${TIMESTAMP}.json" >> "$GITHUB_ENV"
 
       - name: Ping Rebalancer API
         run: |
-          curl -s -X GET "https://atom.syntiox.top/api/rebalancer" \
-          -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
-          -o ${{ env.LOG_FILE }} \
-          --fail
-          
+          curl -sS -X GET "https://atom.syntiox.top/api/rebalancer" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            -o "$LOG_FILE" \
+            --fail
+
           echo "--- API Response ---"
-          cat ${{ env.LOG_FILE }}
+          cat "$LOG_FILE"
 
       - name: Upload Logs as Artifact
-        if: always() 
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: rebalancer-cron-logs
           path: ${{ env.LOG_FILE }}
+          if-no-files-found: warn
 
       - name: Clean up old logs
+        if: always()
         run: |
-    
-          find logs/ -name "log_*.json" -mtime +1 -delete
+          CUTOFF_EPOCH=$(date -u -d '24 hours ago' +%s)
+
+          for file in logs/log_*.json; do
+            [ -f "$file" ] || continue
+
+            filename="${file##*/}"
+            timestamp="${filename#log_}"
+            timestamp="${timestamp%.json}"
+
+            log_date="${timestamp%%_*}"
+            log_time="${timestamp#*_}"
+            log_time="${log_time//-/:}"
+
+            log_epoch=$(date -u -d "${log_date}T${log_time}Z" +%s 2>/dev/null || echo 0)
+
+            if [ "$log_epoch" -gt 0 ] && [ "$log_epoch" -lt "$CUTOFF_EPOCH" ]; then
+              echo "Deleting old log: $file"
+              rm -f -- "$file"
+            fi
+          done
+
+          echo "Log cleanup completed."
 
       - name: Commit and Push logs to Repository
+        if: always()
         run: |
-          git config --global user.name "Syntiox Bot"
-          git config --global user.email "no-reply@s4z.top"
+          git config user.name "Syntiox Bot"
+          git config user.email "no-reply@s4z.top"
+
           git add logs/
-          
-          git diff-index --quiet HEAD || git commit -m "📝 Add log & cleanup old logs for $(date +"%Y-%m-%d %H:%M:%S")"
-          git push
+
+          if ! git diff --cached --quiet; then
+            COMMIT_TIME=$(date -u +"%Y-%m-%d %H:%M:%S")
+
+            git commit -m "📝 Update logs and cleanup old logs for ${COMMIT_TIME}"
+            git push
+          else
+            echo "No log changes to commit."
+          fi
